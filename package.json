@@ -1,0 +1,21 @@
+{
+  "name": "savely",
+  "version": "1.0.0",
+  "description": "Savely - Comparador de precios con frontend React y backend Express",
+  "main": "backend/server.js",
+  "scripts": {
+    "start": "node backend/server.js",
+    "dev": "node --watch backend/server.js",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend install && npm --prefix frontend run build"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "axios": "^1.19.0",
+    "dotenv": "^16.6.1",
+    "express": "^5.2.1"
+  }
+}
