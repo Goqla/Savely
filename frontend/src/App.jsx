@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { ArrowDownUp, ArrowRight, Check, CheckCircle2, ChevronDown, CircleHelp, Clock3, Heart, Menu, Package, Plus, Search, ShoppingBag, ShoppingCart, SlidersHorizontal, Sparkles, Trash2, TrendingDown, X, Zap } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { supabase } from './supabase';
@@ -33,13 +35,51 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [cart, setCart] = useState([]);
+
+  const [cart, setCart] = useState(() => {
+    try {
+      const saved = JSON.parse(
+        localStorage.getItem('savely_cart') || '[]'
+      );
+
+      if (!Array.isArray(saved)) return [];
+
+      return saved
+        .filter(item =>
+          item &&
+          typeof item.key === 'string' &&
+          typeof item.name === 'string' &&
+          typeof item.chain === 'string' &&
+          Number.isFinite(item.price) &&
+          item.price > 0
+        )
+        .map(item => ({
+          key: item.key,
+          name: item.name,
+          chain: item.chain,
+          price: item.price,
+          quantity: Number.isInteger(item.quantity)
+            ? Math.max(1, Math.min(999, item.quantity))
+            : 1,
+        }));
+    } catch {
+      return [];
+    }
+  });
+
   const [cartOpen, setCartOpen] = useState(false);
   const [mobileFilters, setMobileFilters] = useState(false);
   const [searched, setSearched] = useState(false);
   const abortRef = useRef(null);
   const searchRef = useRef(null);
   const requestVersion = useRef(0);
+  useEffect(() => {
+    try {
+      localStorage.setItem('savely_cart', JSON.stringify(cart));
+    } catch (error) {
+      console.error('No se pudo guardar el carrito:', error);
+    }
+  }, [cart]);
 
   useEffect(() => {
     let active = true;
@@ -120,8 +160,218 @@ export default function App() {
   const cheapest = useMemo(() => rows.filter(validPrice).reduce((min, r) => !min || Number(r.precio) < Number(min.precio) ? r : min, null), [rows]);
   const availableCount = rows.filter(validPrice).length;
   const toggle = id => setSelected(curr => curr.includes(id) ? curr.filter(c => c !== id) : [...curr, id]);
-  const addToCart = row => { const item = { key: `${row.cadena}-${row.ean || row.nombre}`, name: row.nombre || debounced, chain: row.cadena, price: Number(row.precio) }; setCart(prev => prev.some(x => x.key === item.key) ? prev : [...prev, item]); };
-  const cartTotal = cart.reduce((sum, r) => sum + r.price, 0);
+  const addToCart = row => {
+    if (!validPrice(row)) return;
+
+    const item = {
+      key: `${row.cadena}-${row.ean || row.nombre}`,
+      name: row.nombre || debounced,
+      chain: row.cadena,
+      price: Number(row.precio),
+      quantity: 1,
+    };
+
+    setCart(prev =>
+      prev.some(product => product.key === item.key)
+        ? prev
+        : [...prev, item]
+    );
+  };
+  const updateQuantity = (key, change) => {
+    setCart(prev =>
+      prev.map(item => {
+        if (item.key !== key) return item;
+
+        return {
+          ...item,
+          quantity: Math.max(
+            1,
+            Math.min(999, item.quantity + change)
+          ),
+        };
+      })
+    );
+  };
+
+  const downloadTicket = async () => {
+    if (cart.length === 0) return;
+
+    // Verificar que el usuario esté autenticado en Supabase.
+    const { data, error } = await supabase.auth.getUser();
+
+    if (error || !data.user) {
+      alert('Debés iniciar sesión para descargar el ticket.');
+      window.location.href = '/login';
+      return;
+    }
+
+    const pdf = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4',
+    });
+
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const date = new Date();
+
+    const dateText = date.toLocaleString('es-AR', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+
+    const formatPrice = value =>
+      Number(value).toLocaleString('es-AR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+
+    // Encabezado
+    pdf.setFillColor(124, 58, 237);
+    pdf.rect(0, 0, pageWidth, 40, 'F');
+
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(26);
+    pdf.setTextColor(255, 255, 255);
+    pdf.text('savely.', 14, 24);
+
+    pdf.setFontSize(10);
+    pdf.setFont('helvetica', 'normal');
+    pdf.text('LISTA DE COMPRAS', 195, 19, {
+      align: 'right',
+    });
+
+    pdf.setTextColor(45, 35, 65);
+    pdf.setFontSize(12);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text('Ticket de compra estimado', 14, 52);
+
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(10);
+    pdf.setTextColor(110, 105, 120);
+    pdf.text(`Generado: ${dateText}`, 14, 60);
+
+    // Productos
+    const tableRows = cart.map((item, index) => {
+      const chain = CHAINS.find(c => c.id === item.chain);
+
+      return [
+        String(index + 1),
+        item.name,
+        String(item.quantity),
+        `$ ${formatPrice(item.price)}`,
+        chain?.display || item.chain,
+        `$ ${formatPrice(item.price * item.quantity)}`,
+      ];
+    });
+
+    autoTable(pdf, {
+      startY: 69,
+      head: [[
+        'Item',
+        'Producto',
+        'Cant.',
+        'Precio unit.',
+        'Supermercado',
+        'Subtotal',
+      ]],
+      body: tableRows,
+      theme: 'grid',
+      styles: {
+        font: 'helvetica',
+        fontSize: 8,
+        cellPadding: 3,
+        overflow: 'linebreak',
+        valign: 'middle',
+      },
+      headStyles: {
+        fillColor: [124, 58, 237],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+      },
+      columnStyles: {
+        0: { cellWidth: 11, halign: 'center' },
+        1: { cellWidth: 'auto' },
+        2: { cellWidth: 14, halign: 'center' },
+        3: { cellWidth: 29, halign: 'right' },
+        4: { cellWidth: 30 },
+        5: { cellWidth: 30, halign: 'right' },
+      },
+      margin: {
+        left: 14,
+        right: 14,
+        bottom: 20,
+      },
+    });
+
+    const total = cart.reduce(
+      (sum, item) => sum + item.price * item.quantity,
+      0
+    );
+
+    let y = pdf.lastAutoTable.finalY + 15;
+
+    // Si el total no entra en la página, crear otra.
+    if (y > 265) {
+      pdf.addPage();
+      y = 25;
+    }
+
+    pdf.setDrawColor(220, 210, 240);
+    pdf.line(14, y - 7, 196, y - 7);
+
+    pdf.setTextColor(45, 35, 65);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(12);
+    pdf.text('TOTAL APROXIMADO', 14, y);
+
+    pdf.setTextColor(124, 58, 237);
+    pdf.setFontSize(16);
+    pdf.text(
+      `$ ${formatPrice(total)}`,
+      196,
+      y,
+      { align: 'right' }
+    );
+
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(9);
+    pdf.setTextColor(120, 115, 130);
+
+    const note =
+      'Los precios son orientativos y pueden variar ' +
+      'segun el supermercado, la sucursal y la fecha. ' +
+      'Este documento no es un comprobante fiscal.';
+
+    const noteLines = pdf.splitTextToSize(note, 180);
+    pdf.text(noteLines, 14, y + 12);
+
+    // Numeración de páginas
+    const pages = pdf.getNumberOfPages();
+
+    for (let i = 1; i <= pages; i++) {
+      pdf.setPage(i);
+      pdf.setFontSize(8);
+      pdf.setTextColor(150, 145, 160);
+
+      pdf.text(
+        `Savely - Pagina ${i} de ${pages}`,
+        pageWidth / 2,
+        288,
+        { align: 'center' }
+      );
+    }
+
+    pdf.save('Savely_Ticket.pdf');
+  };
+
+  const cartTotal = cart.reduce(
+    (total, item) => total + item.price * item.quantity,
+    0
+  );
+  const cartUnits = cart.reduce(
+    (total, item) => total + item.quantity,
+    0
+  );
   const showResult = searched && debounced.length >= 2;
   return <>
 
@@ -196,6 +446,157 @@ export default function App() {
       </div></div></section>
       <section className="how-section" id="como-funciona"><div className="container"><span className="section-kicker">ASÍ DE SIMPLE</span><h2>Ahorrar nunca fue tan fácil</h2><div className="steps"><div className="step"><span className="step-icon"><Search size={26} /></span><span className="step-num">01</span><h3>Buscá un producto</h3><p>Escribí el nombre de lo que necesitás comprar.</p></div><div className="step"><span className="step-icon"><ArrowDownUp size={26} /></span><span className="step-num">02</span><h3>Compará precios</h3><p>Revisá los precios disponibles en distintos supermercados.</p></div><div className="step"><span className="step-icon"><ShoppingCart size={26} /></span><span className="step-num">03</span><h3>Armá tu lista</h3><p>Elegí tus opciones y agregalas a una lista temporal.</p></div></div></div></section>
     </main><footer className="footer"><div className="container footer-main"><div><Brand /><p>Compará mejor. Comprá inteligente.</p></div><div><span>Hecho para simplificar tus compras <Heart size={15} fill="currentColor" /></span><small>Datos consultados mediante Precios Claros. Savely es un proyecto independiente.</small></div></div><div className="container footer-bottom">© {new Date().getFullYear()} Savely. Todos los derechos reservados. <span>Los precios mostrados son orientativos.</span></div></footer>
-    {cartOpen && <div className="drawer-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setCartOpen(false) }}><aside className="cart-drawer" role="dialog" aria-modal="true" aria-label="Mi lista de compras"><div className="drawer-header"><div><span className="section-kicker">TUS SELECCIONES</span><h2>Mi lista <span>({cart.length})</span></h2></div><button className="icon-button" aria-label="Cerrar lista" onClick={() => setCartOpen(false)}><X size={22} /></button></div><div className="drawer-body">{cart.length === 0 ? <div className="cart-empty"><span className="state-icon"><ShoppingCart size={28} /></span><h3>Tu lista está vacía</h3><p>Agregá productos desde la tabla de comparación.</p></div> : cart.map(item => { const chain = CHAINS.find(c => c.id === item.chain); return <div className="cart-item" key={item.key}><Illustration small /><div><strong>{item.name}</strong><small>{chain?.display || item.chain}</small><b>{money(item.price)}</b></div><button className="icon-button" onClick={() => setCart(prev => prev.filter(x => x.key !== item.key))} aria-label={`Quitar ${item.name}`}><Trash2 size={17} /></button></div> })}</div><div className="drawer-bottom"><div className="total-row"><span>Total estimado</span><strong>{money(cartTotal)}</strong></div><p>La lista no se guarda. Se perderá al actualizar o cerrar esta página.</p>{cart.length > 0 && <button className="remove-all" onClick={() => setCart([])}><Trash2 size={16} /> Vaciar lista</button>}</div></aside></div>}
+
+    {cartOpen && (
+      <div
+        className="drawer-overlay"
+        onMouseDown={e => {
+          if (e.target === e.currentTarget) {
+            setCartOpen(false);
+          }
+        }}
+      >
+        <aside
+          className="cart-drawer"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Mi lista de compras"
+        >
+          <div className="drawer-header">
+            <div>
+              <span className="section-kicker">
+                TUS SELECCIONES
+              </span>
+              <h2>
+                Mi lista <span>({cartUnits})</span>
+              </h2>
+            </div>
+
+            <button
+              className="icon-button"
+              aria-label="Cerrar lista"
+              onClick={() => setCartOpen(false)}
+            >
+              <X size={22} />
+            </button>
+          </div>
+
+          <div className="drawer-body">
+            {cart.length === 0 ? (
+              <div className="cart-empty">
+                <span className="state-icon">
+                  <ShoppingCart size={28} />
+                </span>
+
+                <h3>Tu lista está vacía</h3>
+                <p>
+                  Agregá productos desde la tabla
+                  de comparación.
+                </p>
+              </div>
+            ) : (
+              cart.map(item => {
+                const chain = CHAINS.find(
+                  c => c.id === item.chain
+                );
+
+                return (
+                  <div className="cart-item" key={item.key}>
+                    <Illustration small />
+
+                    <div className="cart-item-info">
+                      <strong>{item.name}</strong>
+
+                      <small>
+                        {chain?.display || item.chain}
+                      </small>
+
+                      <small>
+                        Precio unitario: {money(item.price)}
+                      </small>
+
+                      <div className="cart-quantity">
+                        <button
+                          onClick={() =>
+                            updateQuantity(item.key, -1)
+                          }
+                          disabled={item.quantity <= 1}
+                          aria-label={`Disminuir cantidad de ${item.name}`}
+                        >
+                          −
+                        </button>
+
+                        <span>{item.quantity}</span>
+
+                        <button
+                          onClick={() =>
+                            updateQuantity(item.key, 1)
+                          }
+                          disabled={item.quantity >= 999}
+                          aria-label={`Aumentar cantidad de ${item.name}`}
+                        >
+                          +
+                        </button>
+                      </div>
+
+                      <b className="cart-subtotal">
+                        Subtotal: {money(
+                          item.price * item.quantity
+                        )}
+                      </b>
+                    </div>
+
+                    <button
+                      className="icon-button"
+                      onClick={() =>
+                        setCart(prev =>
+                          prev.filter(x => x.key !== item.key)
+                        )
+                      }
+                      aria-label={`Quitar ${item.name}`}
+                    >
+                      <Trash2 size={17} />
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          <div className="drawer-bottom">
+            <div className="total-row">
+              <span>Total aproximado</span>
+              <strong>{money(cartTotal)}</strong>
+            </div>
+
+            <p>
+              Los precios son orientativos y pueden variar
+              según el supermercado y la sucursal.
+              Tu lista se conserva en este navegador.
+            </p>
+
+            {cart.length > 0 && (
+              <div className="cart-actions">
+                <button
+                  className="download-ticket"
+                  onClick={downloadTicket}
+                >
+                  Descargar ticket PDF
+                </button>
+
+                <button
+                  className="remove-all"
+                  onClick={() => setCart([])}
+                >
+                  <Trash2 size={16} />
+                  Vaciar carrito
+                </button>
+              </div>
+            )}
+          </div>
+        </aside>
+      </div>
+    )}
+
   </>;
 }

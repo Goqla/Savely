@@ -1685,3 +1685,104 @@ h3 {
         font-size: 25px;
     }
 }
+
+.cart-item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.cart-item-info strong {
+    display: block;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.cart-item-info small {
+    display: block;
+    color: #92899e;
+    font-size: 11px;
+    margin-top: 5px;
+}
+
+.cart-quantity {
+    display: inline-flex;
+    align-items: center;
+    gap: 13px;
+    margin-top: 12px;
+    padding: 4px;
+    border: 1px solid #e7dff4;
+    border-radius: 10px;
+}
+
+.cart-quantity button {
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    border: none;
+    border-radius: 7px;
+    background: #f2edfd;
+    color: #7c3aed;
+    font-weight: 800;
+    font-size: 17px;
+}
+
+.cart-quantity button:hover:not(:disabled) {
+    background: #7c3aed;
+    color: white;
+}
+
+.cart-quantity button:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.cart-quantity span {
+    min-width: 20px;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 700;
+    color: #352843;
+}
+
+.cart-item-info .cart-subtotal {
+    display: block;
+    margin-top: 12px;
+    font-size: 12px;
+    font-weight: 800;
+    color: #7c3aed;
+}
+
+.cart-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+.download-ticket {
+    width: 100%;
+    padding: 14px 16px;
+    border: none;
+    border-radius: 10px;
+    background: #7c3aed;
+    color: white;
+    font-size: 13px;
+    font-weight: 700;
+    transition: background 0.2s;
+}
+
+.download-ticket:hover {
+    background: #6428d4;
+}
+
+.cart-actions .remove-all {
+    margin-top: 0;
+    padding: 13px;
+}
+
+.cart-actions button:focus-visible,
+.cart-quantity button:focus-visible {
+    outline: 2px solid #7c3aed;
+    outline-offset: 3px;
+}
