@@ -1,7 +1,4 @@
-# 🛒 Savely 
-
-Página: [Click Aquí](https://savely-hhlf.onrender.com)
-
+# 🛒 Savely
 **Página web:** [Acceder a Savely](https://savely-hhlf.onrender.com)
 
 **Repositorio:** [GitHub - Savely](https://github.com/Goqla/Savely)
